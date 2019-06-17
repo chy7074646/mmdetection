@@ -1,0 +1,1 @@
+python tools/analyze_logs.py cal_train_time work_dirs/faster_rcnn_r50_fpn_1x/20190614_014712.log.json

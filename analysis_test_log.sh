@@ -1,0 +1,1 @@
+python tools/analyze_logs.py plot_curve work_dirs/faster_rcnn_r50_fpn_1x/20190614_061451.log.json
