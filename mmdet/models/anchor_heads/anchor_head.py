@@ -89,7 +89,7 @@ class AnchorHead(nn.Module):
 
     def forward(self, feats):
         return multi_apply(self.forward_single, feats)
-
+        
     def get_anchors(self, featmap_sizes, img_metas):
         """Get anchors according to feature map sizes.
 

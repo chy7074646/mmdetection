@@ -12,6 +12,8 @@ from ..registry import HEADS
 @HEADS.register_module
 class RPNHead(AnchorHead):
 
+    
+
     def __init__(self, in_channels, **kwargs):
         super(RPNHead, self).__init__(2, in_channels, **kwargs)
 
@@ -22,11 +24,13 @@ class RPNHead(AnchorHead):
                                  self.num_anchors * self.cls_out_channels, 1)
         self.rpn_reg = nn.Conv2d(self.feat_channels, self.num_anchors * 4, 1)
 
+
     def init_weights(self):
         normal_init(self.rpn_conv, std=0.01)
         normal_init(self.rpn_cls, std=0.01)
         normal_init(self.rpn_reg, std=0.01)
 
+        
     def forward_single(self, x):
         x = self.rpn_conv(x)
         x = F.relu(x, inplace=True)

@@ -93,6 +93,5 @@ def main():
         validate=args.validate,
         logger=logger)
 
-
 if __name__ == '__main__':
     main()

@@ -83,8 +83,11 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
 
     def extract_feat(self, img):
         x = self.backbone(img)
+        
+       # print("---------x---------",x.shape)
         if self.with_neck:
             x = self.neck(x)
+            
         return x
 
     def forward_train(self,
@@ -95,6 +98,7 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
                       gt_bboxes_ignore=None,
                       gt_masks=None,
                       proposals=None):
+                      
         x = self.extract_feat(img)
 
         losses = dict()

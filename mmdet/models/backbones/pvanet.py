@@ -1,8 +1,13 @@
 import torch
+import math
 import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import *
+
+from torch.nn.modules.batchnorm import _BatchNorm
+from ..registry import BACKBONES
+
+#from utils import *
 
 class CReLu(nn.Module):
     def __ini__(self, act=F.relu):
@@ -112,6 +117,7 @@ class Inception(nn.Module):
         self.act_func=nn.ReLU
         self.act=F.relu
         self.in_stride=in_stride
+        self.lastConv=lastConv
         
         self.n_branches=0
         self.n_outs=[]
@@ -196,6 +202,7 @@ class Inception(nn.Module):
             x=self.act(x)
         
         #compute branch
+
         h=[]
         for i in range(self.n_branches):
             module=self.branch(i)
@@ -204,7 +211,8 @@ class Inception(nn.Module):
             h.append(module(x))
             
         x=torch.cat(h,dim=1)
-        if lastConv:
+        
+        if (self.lastConv):
             x=self.last_conv(x)
             x=self.last_bn(x)
         
@@ -218,9 +226,7 @@ class Inception(nn.Module):
         if self.proj:
             x_sc=self.proj(x_sc)
             x=x+x_sc
-        
-       # x=x+x_sc
-        
+
         return x
 
 # This class is impl. separately so that we can modify feature extraction codes for OD models
@@ -228,6 +234,7 @@ class Inception(nn.Module):
 class PVANetFeat(nn.Module):
     #this class is im
     def __init__(self):
+                 
         super(PVANetFeat,self).__init__()
         
         self.conv1=nn.Sequential(
@@ -313,10 +320,20 @@ class PVANetFeat(nn.Module):
         
         return module.finalize()
     
-        
+@BACKBONES.register_module        
 class PVALiteFeat(nn.Module):
-    def __init__(self):
+    def __init__(self,
+                 num_stages=5,
+                 out_indices=(0, 1, 2, 3, 4),
+                 norm_eval=True):
+                 
         super(PVALiteFeat,self).__init__()
+        
+        self.num_stages = num_stages
+        self.out_indices = out_indices
+        assert max(out_indices) < num_stages
+        self.norm_eval = norm_eval
+        self.act=F.relu
         
         self.conv1=nn.Sequential(ConvBnAct(3,32,4,2,1))
         self.conv2=nn.Sequential(ConvBnAct(32,48,3,2,1))
@@ -326,8 +343,8 @@ class PVALiteFeat(nn.Module):
                 self.gen_InceptionLiteA(96,2,True),
                 self.gen_InceptionLiteA(192,1,False),
                 self.gen_InceptionLiteA(192,1,False),
-                self.gen-InceptionLiteA(192,1,False),
-                self.gen-InceptionLiteA(192,1,False)  
+                self.gen_InceptionLiteA(192,1,False),
+                self.gen_InceptionLiteA(192,1,False)  
                 
                 )
         
@@ -339,62 +356,119 @@ class PVALiteFeat(nn.Module):
                 self.gen_InceptionLiteB(256,1,False)
                 
                 )
+                
+        #upsample
+        self.upsample=nn.Sequential(
+                #nn.Upsample(mode='bilinear', scale_factor=2, align_corners=True)
+                nn.ConvTranspose2d(256,256,4,2,1,groups=256,bias=False)
+               )
         
-       #upsample
-       self.upsample=nn.Sequential(
-                nn.Upsample(mode='bilinear', scale_factor=2, align_corners=True)
+        self.downsample=nn.Sequential(
+                nn.MaxPool2d(3,2,1)  #achieve downsampling by pool,note caffe (k=3,s=2,p=0)
                )
-       
-       self.downsample=nn.Sequential(
-               nn.MaxPool2d(3,2,0)
-               )
-       
-       self.convf=nn.Sequential(
-               F.relu(nn.Conv2d(544,256,1,1))
-               )
-       
-       
+        
+        self.convf=nn.Sequential(
+                nn.Conv2d(544,256,1,1)
+               )    
        
     def forward(self,x):
+        
+        #stage 0
         x1=self.conv1(x)
         x2=self.conv2(x1)
         x3=self.conv3(x2)
+        
+        outs = []
+        if 0 in self.out_indices:
+           outs.append(x3) 
+        
+        #stage 1
         Ix3=self.incep3(x3)
+        if 1 in self.out_indices:
+           outs.append(Ix3)
+        
+        #stage 2
         Ix4=self.incep4(Ix3)
+        if 2 in self.out_indices:
+           outs.append(Ix4)
+        
+        #stage 3
         x5_1=self.upsample(Ix4)
+        if 3 in self.out_indices:
+           outs.append(x5_1)
+        
         x5_0=self.downsample(x3)
-        x6=torch.cat({x5_0,x5_1,Ix3},dim=1)
         
-        out=self.convf(x6)
+        #stage 4
+        x6=torch.cat([x5_0,torch.cat([x5_1,Ix3],dim=1)],dim=1)
+        x6=self.convf(x6)
+        x6=self.act(x6)
+        if 4 in self.out_indices:
+           outs.append(x6)
         
-        return out
+        #out=self.convf(x6)
         
+        #print("------------pva_lite_feat---------",out.shape)
         
+        return tuple(outs)
         
-        
+           
     def gen_InceptionLiteA(self,n_in,stride=1,poolconv=False,n_out=192):
         
         module=Inception(n_in,n_out,preAct=False,lastAct=False,in_stride=stride,proj=False,lastConv=False)\
                 .add_convs([1,3,3],[16,32,32])\
-                .add_convs([1,3],[16,64])\)
-        
+                .add_convs([1,3],[16,64])
+                
         if poolconv:
-            module.add_poolconv(3,96)
+            return module.add_poolconv(3,96)       
+            
+        return module.add_convs([1],[96])
         
-        return module
         
     def gen_InceptionLiteB(self,n_in,stride=1,poolconv=False,n_out=256):
         
         module=Inception(n_in,n_out,preAct=False,lastAct=False,in_stride=stride,proj=False,lastConv=False)\
                 .add_convs([1,3,3],[16,32,32])\
-                .add_convs([1,3],[32,96])\)
+                .add_convs([1,3],[32,96])
         
         if poolconv:
-            module.add_poolconv(3,128)
+            return module.add_poolconv(3,128)
         
-        return module
+        return module.add_convs([1],[128])
         
-        
+    def init_weights(self, pretrained=None):
+        if isinstance(pretrained, str):
+            logger = logging.getLogger()
+            load_checkpoint(self, pretrained, strict=False, logger=logger)
+            
+        elif pretrained is None:
+            for m in self.modules():
+                if isinstance(m, nn.Conv2d):
+                    if(m.in_channels!=m.out_channels or m.out_channels!=m.groups or m.bias is not None):
+                        # don't want to reinitialize downsample layers, code assuming normal conv layers will not have these characteristics
+                        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                        if m.bias is not None:
+                            nn.init.constant_(m.bias, 0)
+                    else:
+                        print('Not initializing')
+                elif isinstance(m, _BatchNorm):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.Linear):
+                    nn.init.normal_(m.weight, 0, 0.01)
+                    nn.init.constant_(m.bias, 0)
+                    
+        else:
+            raise TypeError('pretrained must be a str or None')
+    
+    def train(self, mode=True):
+        super(PVALiteFeat, self).train(mode)
+        if mode and self.norm_eval:
+            for m in self.modules():
+                # trick: eval have effect on BatchNorm only
+                if isinstance(m, _BatchNorm):
+                    m.eval()
+
             
 class PVANet(nn.Module):
     def __init__(self,inputsize=224,num_classes=1000):
@@ -433,41 +507,42 @@ class PVANet(nn.Module):
 class PVALiteNet(nn.Module):
     
     def __init__(self,inputsize=224,num_classes=1000):
-    super(PVALiteNet,self).__init__()
-    
-    self.features=PVALiteFeat()
-    
-    #make sure that input size is multiplier by 32
-    assert(inputsize%32==0)
-    featsize=inputsize/32
-    
-    self.classifier=nn.Sequential(
-            nn.Linear(384*featsize*featsize,4096),
-            nn.BatchNorm1d(4096),
-            nn.ReLU(inplace=True),
-            nn.Dropout(),
-            
-            nn.Linear(4096,4096),
-            nn.BatchNorm1d(4096),
-            nn.ReLU(inpalce=True),
-            nn.Dropout(),
-            
-            nn.Linear(4096, num_classes)
-            )
-    
-    #Initialize all vars
-    initvars(self.modules())
+        super(PVALiteNet,self).__init__()
+        
+        self.features=PVALiteFeat()
+        
+        #make sure that input size is multiplier by 32
+        assert(inputsize%32==0)
+        featsize=inputsize/32*2 ##because it has a upsample layer
+        tmp=int(256*featsize*featsize)
+        
+        self.classifier=nn.Sequential(
+                nn.Linear(tmp,4096),
+                nn.BatchNorm1d(4096),
+                nn.ReLU(inplace=True),
+                nn.Dropout(),
+                
+                nn.Linear(4096,4096),
+                nn.BatchNorm1d(4096),
+                nn.ReLU(inplace=True),
+                nn.Dropout(),
+                
+                nn.Linear(4096, num_classes)
+                )
+        
+        #Initialize all vars
+        #initvars(self.modules())
     
     def forward(self,x):
-        x=slef.features(x)
+        x=self.features(x)
         x=x.view(x.size(0),-1)
         x=self.classifier(x)
         
         return x
         
-def pvanet(**kwargs):
-    #model=PVANet(**kwargs)
-    model=PVALiteFeat(**kwargs)
+# def pvanet(**kwargs):
+    # #model=PVANet(**kwargs)
+    # model=PVALiteNet(**kwargs)
     
-    return model
+    # return model
         
