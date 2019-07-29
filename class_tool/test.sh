@@ -1,0 +1,1 @@
+python main.py --data /home2/project_data/BreakPaper/FDY_POY_cam12_inside/ -es --evaluate-save -f 2 -a vgg16_lpf --resume weights/vgg16/model_best.pth.tar --out-dir weights/vgg16/out/ |tee vgg16_test_log_org_2019_06_10
